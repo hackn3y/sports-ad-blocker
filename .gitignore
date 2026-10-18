@@ -1,0 +1,6 @@
+# Ignore the templates folder containing images
+templates/
+
+# Ignore Python compiled bytecode and cache directories
+__pycache__/
+*.pyc

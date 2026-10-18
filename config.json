@@ -1,0 +1,130 @@
+{
+  "detection_mode": "sports",
+  "active_sport": "auto",
+  "target": {
+    "monitor_target": "55R617",
+    "monitor_index": 2,
+    "browser_executables": [
+      "chrome.exe",
+      "brave.exe",
+      "msedge.exe"
+    ]
+  },
+  "capture": {
+    "fps": 10
+  },
+  "sports_detection": {
+    "enabled": true,
+    "disappear_debounce_seconds": 0.1,
+    "auto_switch_confirm_frames": 3,
+    "scoreboard_ocr_interval_seconds": 0.2,
+    "windowed_top_inset_px": null,
+    "reappear_debounce_frames": 3,
+    "scoreboard_fast_recovery_threshold": 0.85,
+    "bug_only_grace_seconds": 15.0,
+    "bug_hold_threshold": 0.55,
+    "bug_miss_grace_seconds": 0.5,
+    "replay_scoreboard_threshold": 0.9,
+    "replay_bug_threshold": 0.6,
+    "match_threshold": 0.6,
+    "search_padding": 80,
+    "template_path": "templates/baseball_scoreboard.png",
+    "scoreboard_roi": {
+      "left": 105,
+      "top": 29,
+      "width": 529,
+      "height": 165
+    },
+    "broadcast_bug_enabled": true,
+    "broadcast_bug_template_path": "templates/baseball_bug.png",
+    "broadcast_bug_roi": {
+      "left": 74,
+      "top": 62,
+      "width": 335,
+      "height": 109
+    },
+    "broadcast_bug_threshold": 0.76,
+    "calibrated_frame": {
+      "width": 2560,
+      "height": 1440
+    }
+  },
+  "sports_profiles": {
+    "baseball": {
+      "name": "Baseball (MLB)",
+      "scoreboard_template_path": "templates/baseball_scoreboard.png",
+      "scoreboard_roi": {
+        "left": 105,
+        "top": 29,
+        "width": 529,
+        "height": 165
+      },
+      "match_threshold": 0.6,
+      "broadcast_bug_enabled": true,
+      "broadcast_bug_template_path": "templates/baseball_bug.png",
+      "broadcast_bug_roi": {
+        "left": 74,
+        "top": 62,
+        "width": 335,
+        "height": 109
+      },
+      "broadcast_bug_threshold": 0.76,
+      "calibrated_frame": {
+        "width": 2560,
+        "height": 1440
+      },
+      "scoreboard_extra_templates": [
+        "templates/baseball_scoreboard_2.png"
+      ]
+    },
+    "football": {
+      "name": "Football (NFL/CFB)",
+      "scoreboard_template_path": "templates/football_scoreboard.png",
+      "scoreboard_ocr_enabled": true,
+      "scoreboard_roi": {
+        "left": 686,
+        "top": 1139,
+        "width": 1142,
+        "height": 245
+      },
+      "match_threshold": 0.6,
+      "broadcast_bug_enabled": true,
+      "broadcast_bug_template_path": "templates/football_bug.png",
+      "broadcast_bug_roi": {
+        "left": 2132,
+        "top": 69,
+        "width": 326,
+        "height": 110
+      },
+      "broadcast_bug_threshold": 0.6,
+      "calibrated_frame": {
+        "width": 2560,
+        "height": 1440
+      },
+      "broadcast_bug_extra_templates": [
+        "templates/football_bug_2.png",
+        "templates/football_bug_3.png",
+        "templates/football_bug_4.png",
+        "templates/football_bug_5.png"
+      ],
+      "scoreboard_extra_templates": [
+        "templates/football_scoreboard_2.png",
+        "templates/football_scoreboard_3.png"
+      ]
+    }
+  },
+  "overlay": {
+    "background_color": "#000000",
+    "stay_on_top": true,
+    "cutout_roi": false,
+    "blur_cutouts": false,
+    "cutout_mode": "none"
+  },
+  "debounce": {
+    "max_commercial_seconds": 240
+  },
+  "logging": {
+    "log_level": "INFO",
+    "heartbeat_interval_sec": 1.5
+  }
+}

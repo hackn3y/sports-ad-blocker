@@ -1,0 +1,10 @@
+mss>=10.2.0
+opencv-python-headless>=4.10.0
+rapidocr>=3.10.0,<4
+onnxruntime>=1.19.0,<2
+pillow>=11.0.0
+pycaw>=20240210
+PyQt6>=6.6.0
+comtypes>=1.4.0
+numpy>=1.26.0
+pywin32>=306
