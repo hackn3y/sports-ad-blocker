@@ -622,22 +622,22 @@ class CalibrationOverlay(QWidget):
           )
         else:
           cfg["sports_detection"]["broadcast_bug_template_path"] = self.template_path
-          cfg["sports_detection"]["broadcast_bug_roi"] = {
-              "left": phys_rx,
-              "top": phys_ry,
-              "width": phys_rw,
-              "height": phys_rh,
-          }
           sp_profile["broadcast_bug_template_path"] = self.template_path
-          sp_profile["broadcast_bug_roi"] = {
-              "left": phys_rx,
-              "top": phys_ry,
-              "width": phys_rw,
-              "height": phys_rh,
-          }
           print(
               f"[+] Configured Broadcast Bug ROI for '{self.sport}': X={phys_rx}, Y={phys_ry}, {phys_rw}x{phys_rh} physical"
           )
+        cfg["sports_detection"]["broadcast_bug_roi"] = {
+            "left": phys_rx,
+            "top": phys_ry,
+            "width": phys_rw,
+            "height": phys_rh,
+        }
+        sp_profile["broadcast_bug_roi"] = {
+            "left": phys_rx,
+            "top": phys_ry,
+            "width": phys_rw,
+            "height": phys_rh,
+        }
       else:
         if self.add_template and os.path.normpath(
             sp_profile.get("scoreboard_template_path", "")
@@ -651,23 +651,23 @@ class CalibrationOverlay(QWidget):
           )
         else:
           cfg["sports_detection"]["template_path"] = self.template_path
-          cfg["sports_detection"]["scoreboard_roi"] = {
-              "left": phys_rx,
-              "top": phys_ry,
-              "width": phys_rw,
-              "height": phys_rh,
-          }
           sp_profile["scoreboard_template_path"] = self.template_path
-          sp_profile["scoreboard_roi"] = {
-              "left": phys_rx,
-              "top": phys_ry,
-              "width": phys_rw,
-              "height": phys_rh,
-          }
           sp_profile["match_threshold"] = 0.60
           print(
               f"[+] Configured Scoreboard ROI for '{self.sport}': X={phys_rx}, Y={phys_ry}, {phys_rw}x{phys_rh} physical"
           )
+        cfg["sports_detection"]["scoreboard_roi"] = {
+            "left": phys_rx,
+            "top": phys_ry,
+            "width": phys_rw,
+            "height": phys_rh,
+        }
+        sp_profile["scoreboard_roi"] = {
+            "left": phys_rx,
+            "top": phys_ry,
+            "width": phys_rw,
+            "height": phys_rh,
+        }
 
       if "match_threshold" not in cfg["sports_detection"]:
         cfg["sports_detection"]["match_threshold"] = 0.60

@@ -18,30 +18,35 @@
     "disappear_debounce_seconds": 0.1,
     "auto_switch_confirm_frames": 3,
     "scoreboard_ocr_interval_seconds": 0.2,
+    "football_halftime_ocr_interval_seconds": 1.0,
     "windowed_top_inset_px": null,
     "reappear_debounce_frames": 3,
     "scoreboard_fast_recovery_threshold": 0.85,
-    "bug_only_grace_seconds": 15.0,
+    "bug_only_grace_seconds": 5.0,
     "bug_hold_threshold": 0.55,
+    "bug_strong_hold_threshold": 0.85,
     "bug_miss_grace_seconds": 0.5,
     "replay_scoreboard_threshold": 0.9,
     "replay_bug_threshold": 0.6,
+    "football_field_min_green_ratio": 0.18,
+    "football_field_grace_seconds": 1.0,
+    "football_field_sample_interval_seconds": 0.25,
     "match_threshold": 0.6,
     "search_padding": 80,
-    "template_path": "templates/baseball_scoreboard.png",
+    "template_path": "templates/football_scoreboard.png",
     "scoreboard_roi": {
-      "left": 105,
-      "top": 29,
-      "width": 529,
-      "height": 165
+      "left": 660,
+      "top": 1214,
+      "width": 1252,
+      "height": 160
     },
     "broadcast_bug_enabled": true,
-    "broadcast_bug_template_path": "templates/baseball_bug.png",
+    "broadcast_bug_template_path": "templates/football_bug.png",
     "broadcast_bug_roi": {
-      "left": 74,
-      "top": 62,
-      "width": 335,
-      "height": 109
+      "left": 2191,
+      "top": 54,
+      "width": 300,
+      "height": 58
     },
     "broadcast_bug_threshold": 0.76,
     "calibrated_frame": {
@@ -54,18 +59,18 @@
       "name": "Baseball (MLB)",
       "scoreboard_template_path": "templates/baseball_scoreboard.png",
       "scoreboard_roi": {
-        "left": 105,
-        "top": 29,
-        "width": 529,
-        "height": 165
+        "left": 1961,
+        "top": 1156,
+        "width": 536,
+        "height": 252
       },
       "match_threshold": 0.6,
       "broadcast_bug_enabled": true,
       "broadcast_bug_template_path": "templates/baseball_bug.png",
       "broadcast_bug_roi": {
-        "left": 74,
-        "top": 62,
-        "width": 335,
+        "left": 2148,
+        "top": 71,
+        "width": 294,
         "height": 109
       },
       "broadcast_bug_threshold": 0.76,
@@ -74,7 +79,11 @@
         "height": 1440
       },
       "scoreboard_extra_templates": [
-        "templates/baseball_scoreboard_2.png"
+        "templates/baseball_scoreboard_2.png",
+        "templates/baseball_scoreboard_3.png"
+      ],
+      "broadcast_bug_extra_templates": [
+        "templates/baseball_bug_2.png"
       ]
     },
     "football": {
@@ -82,21 +91,21 @@
       "scoreboard_template_path": "templates/football_scoreboard.png",
       "scoreboard_ocr_enabled": true,
       "scoreboard_roi": {
-        "left": 686,
-        "top": 1139,
-        "width": 1142,
-        "height": 245
+        "left": 660,
+        "top": 1214,
+        "width": 1252,
+        "height": 160
       },
       "match_threshold": 0.6,
       "broadcast_bug_enabled": true,
       "broadcast_bug_template_path": "templates/football_bug.png",
       "broadcast_bug_roi": {
-        "left": 2132,
-        "top": 69,
-        "width": 326,
-        "height": 110
+        "left": 2191,
+        "top": 54,
+        "width": 300,
+        "height": 58
       },
-      "broadcast_bug_threshold": 0.6,
+      "broadcast_bug_threshold": 0.76,
       "calibrated_frame": {
         "width": 2560,
         "height": 1440
@@ -105,11 +114,19 @@
         "templates/football_bug_2.png",
         "templates/football_bug_3.png",
         "templates/football_bug_4.png",
-        "templates/football_bug_5.png"
+        "templates/football_bug_5.png",
+        "templates/football_bug_6.png",
+        "templates/football_bug_7.png",
+        "templates/football_bug_8.png",
+        "templates/football_bug_9.png"
       ],
       "scoreboard_extra_templates": [
         "templates/football_scoreboard_2.png",
-        "templates/football_scoreboard_3.png"
+        "templates/football_scoreboard_3.png",
+        "templates/football_scoreboard_4.png",
+        "templates/football_scoreboard_5.png",
+        "templates/football_scoreboard_6.png",
+        "templates/football_scoreboard_7.png"
       ]
     }
   },

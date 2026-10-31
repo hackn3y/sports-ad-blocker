@@ -6,13 +6,13 @@ A production-grade, high-performance Windows 11 desktop automation tool that mon
 
 ## Detection Modes
 
-### 1. Dual-Anchor Sports Keep-Alive Mode (Default)
+### 1. Sports Keep-Alive Mode (Default)
 In live sports (baseball, football, basketball, hockey), broadcasts do **not** use standard on-demand "Ad" badges.
-Instead, this mode uses **Dual-Anchor Keep-Alive Detection**:
-- **Dual Anchors**: Tracks both the **Scoreboard** (e.g. at the bottom right) and the persistent **Broadcast Watermark / Bug** (e.g. `'FOX NLCS GAME 1'` or network logo in the top right).
-- **Game Active**: While the broadcast is already visible, either the scoreboard or broadcast watermark can keep it visible (including replays when the scoreboard disappears). After a confirmed bug match, lower bug similarity scores (default `0.55`) and brief misses (default `0.5` seconds) are tolerated. A bug score of at least `0.60` also holds the visible picture for up to 15 seconds after a scoreboard score of at least `0.90`.
-- **Commercial Blackout**: During commercial breaks, BOTH anchors must be absent for `disappear_debounce_seconds` before the TV blacks out and the browser is muted. The default `0.1` seconds helps avoid brief black flashes while keeping the delay short.
-- **Confirmed Recovery**: After blackout begins, only the scoreboard (or football scoreboard OCR) can restore video and audio. Strong scoreboard matches at or above `scoreboard_fast_recovery_threshold` (default `0.85`) restore immediately; weaker matches require three consecutive frames. A bug-only match cannot reopen the screen because commercials can contain similar network graphics.
+Instead, this mode uses multiple live-game signals:
+- **Live-game signals**: Tracks the **Scoreboard** (e.g. at the bottom right) and **Broadcast Watermark / Bug** (e.g. `'FOX NLCS GAME 1'` or network logo in the top right). Football also uses broad green-field coverage as a replay cue when the scoreboard disappears.
+- **Game Active**: Scoreboard matches keep the game visible. A trusted bug can bridge brief dropouts, and broad football field coverage can hold an already-visible game briefly when the scoreboard disappears. Football field coverage is limited to one second after the last scoreboard match.
+- **Commercial Blackout**: The applicable live-game cues must be absent for `disappear_debounce_seconds` before the TV blacks out and the browser is muted. The default `0.1` seconds helps avoid brief black flashes while keeping the delay short.
+- **Confirmed Recovery**: Strong scoreboard matches at or above `scoreboard_fast_recovery_threshold` (default `0.85`) restore immediately; weaker scoreboard matches and high-confidence bug matches require three consecutive frames. Bug recovery uses `bug_strong_hold_threshold` (default `0.85`) to reduce false restores from commercial graphics. A commercial that carries the same high-confidence bug can still look like a replay to the detector.
 - **Frosted Acrylic Blur Cutouts**: Windows 11 hardware acrylic blur (`ACCENT_ENABLE_BLURBEHIND`) covers the inspection hole during commercial breaks, completely obscuring moving commercial ads from human vision while allowing OpenCV normalized template matching to detect the bright game logo when it returns.
 - **Multi-Sport Profiles & Auto-Switching**: Seamlessly switch between Baseball and Football without recalibration. In `auto` mode, the blocker automatically senses which sport is playing and switches on the fly!
 
@@ -49,13 +49,15 @@ Broadcast bugs can differ by network, channel, and sport. Detection uses visual 
 ```powershell
 python main.py --sport baseball --calibrate-bug --add-template
 ```
-Use `--sport football` for football. The extra template is saved alongside that sport's existing bug templates. Scoreboards can also be captured with `--calibrate-scoreboard --add-template`; rapidly changing scores or text can still make a whole-scoreboard image a less reliable anchor than a persistent channel bug.
+Use `--sport football` for football. The extra template is saved alongside that sport's existing templates. Each calibration also updates the active ROI to the selected screen location, including `--add-template`; this keeps matching pointed at the newly calibrated scoreboard or bug. Scoreboards can also be captured with `--calibrate-scoreboard --add-template`; rapidly changing scores or text can still make a whole-scoreboard image a less reliable anchor than a persistent channel bug.
 
-Template confidence is visual similarity, not proof that a logo or bug is present. Matching uses `score >= threshold`, so a score exactly at the threshold still counts as a match. The baseball bug anchor is enabled with a `0.76` acquisition threshold and searches only near its calibrated location, rather than falling back to a broad top-of-screen scan. Once matched, the anchor can be held at `sports_detection.bug_hold_threshold` (default `0.55`) and briefly bridge misses for `sports_detection.bug_miss_grace_seconds` (default `0.5`). Replay fallback also holds the visible picture when the bug score is at least `sports_detection.replay_bug_threshold` (default `0.60`) for up to `sports_detection.bug_only_grace_seconds` (default `15`) after a scoreboard score of at least `sports_detection.replay_scoreboard_threshold` (default `0.90`). Bug-only matching cannot restore the picture after blackout, since the bug may resemble graphics shown during commercials. `sports_detection.reappear_debounce_frames` (default `3`) applies to normal scoreboard-based recovery. Strong scoreboard matches at or above `sports_detection.scoreboard_fast_recovery_threshold` (default `0.85`) restore immediately.
+Template confidence is visual similarity, not proof that a logo or bug is present. Matching uses `score >= threshold`, so a score exactly at the threshold still counts as a match. A bug is initially acquired at its configured profile threshold (currently `0.76`). Once acquired, it can bridge lower-confidence frames at `sports_detection.bug_hold_threshold` (default `0.55`) and brief misses at `sports_detection.bug_miss_grace_seconds` (default `0.5`). Those holds are limited to `sports_detection.bug_only_grace_seconds` (default `5`) after the latest scoreboard or threshold-passing bug match; another match refreshes the window. This keeps detection tolerant of a bug's changing appearance while still allowing blackout if matches stop. A high-confidence bug match (at least `sports_detection.bug_strong_hold_threshold`, default `0.85`) can restore from blackout after `sports_detection.reappear_debounce_frames` (default `3`) consecutive matches. A commercial with a sufficiently similar bug could still delay blackout or restore video. Strong scoreboard matches at or above `sports_detection.scoreboard_fast_recovery_threshold` (default `0.85`) restore immediately.
+
+Football has an additional replay cue based on the playing field: green pixels must cover at least `sports_detection.football_field_min_green_ratio` (default `0.18`) of the playback image and be spread across at least four of twelve image tiles. It is sampled every `sports_detection.football_field_sample_interval_seconds` (default `0.25`). A football scoreboard match arms this cue for up to `sports_detection.football_field_grace_seconds` (default `1` second); the timer is not extended by continued green coverage, so this cue cannot prolong a commercial hold. It is not used to restore from blackout. The `--test-detect` output reports green coverage and tile count so you can assess the threshold against your stream.
 
 Automatic sport switching requires consecutive matches of the other sport's scoreboard (or football OCR), rather than switching on a single bug-template match. Configure the count with `sports_detection.auto_switch_confirm_frames` (default `3`). Alternate-sport checks start only after blackout is active, so slow OCR cannot delay the initial blackout; a genuine change to the other sport may therefore briefly black out before detection restores the picture.
 
-The football profile also enables an OCR fallback: instead of matching a fixed scoreboard picture, it scans the top and bottom of the video for a game clock together with a period or down-and-distance cue. This is independent of team names, scores, and which corner the scorebug uses. The existing image templates remain as a fast first check. OCR scans at the interval configured by `sports_detection.scoreboard_ocr_interval_seconds` (default `0.2` seconds). It increases CPU use and is a heuristic rather than a guarantee; unusual graphics, tiny text, halftime layouts, or ads containing similar text can still cause misses or false matches. Install the OCR runtime and bundled English models with `python -m pip install -r requirements.txt`.
+The football profile also enables an OCR fallback: instead of matching a fixed scoreboard picture, it scans the top and bottom of the video for a game clock together with a period or down-and-distance cue. This is independent of team names, scores, and which corner the scorebug uses. The existing image templates remain as a fast first check. OCR scans at the interval configured by `sports_detection.scoreboard_ocr_interval_seconds` (default `0.2` seconds). The matched football scoreboard ROI is also checked every `sports_detection.football_halftime_ocr_interval_seconds` (default `1` second) for an explicit halftime countdown such as “COUNTDOWN TO 2nd HALF”; this cue suppresses scoreboard, bug, and field live signals until the countdown disappears, so commercials during that interval are blacked out. This also blacks out halftime studio coverage while the countdown remains visible. OCR increases CPU use and is a heuristic; unusual graphics, tiny text, or OCR misses can still cause detection errors. Install the OCR runtime and bundled English models with `python -m pip install -r requirements.txt`.
 
 RapidOCR's repetitive warning that a scan found no text is suppressed because empty bands are expected during commercials. Other OCR warnings and errors remain enabled.
 
@@ -126,11 +128,12 @@ python main.py --test-simulation
 - Demonstrates the 1.5-second hysteresis debounce hold.
 - Automatically un-mutes your browser and removes the black overlay.
 
-### 3. Run Detection Diagnostics (10 Frames Telemetry)
-Test screen grabbing speed and audio meter hooks:
+### 3. Run Detection Diagnostics (15 Frames)
+Test screen grabbing speed, audio meter hooks, and raw scoreboard/bug matches:
 ```powershell
 python main.py --test-detect
 ```
+Each frame reports the scoreboard and bug scores plus whether each passed its configured threshold. During normal operation, live status lines also report the signal holding the game visible (`scoreboard`, `strong-bug`, `bug-grace`, `replay-bug`, or `football-field`); commercial transition lines include both scores and match flags. Compare those values while a replay is on screen and when a commercial starts. Diagnostic mode samples the current picture only; it does not simulate replay or commercial transitions.
 
 ### 4. Calibrate the Scoreboard on Your 55" TV
 With your game (baseball, football, etc.) playing on your TV (on Hulu, Prime Video, ESPN, FOX, or anywhere):
@@ -188,8 +191,9 @@ python main.py
     "windowed_top_inset_px": null,
     "reappear_debounce_frames": 3,
     "scoreboard_fast_recovery_threshold": 0.85,
-    "bug_only_grace_seconds": 15.0,
+    "bug_only_grace_seconds": 5.0,
     "bug_hold_threshold": 0.55,
+    "bug_strong_hold_threshold": 0.85,
     "bug_miss_grace_seconds": 0.5,
     "replay_scoreboard_threshold": 0.90,
     "replay_bug_threshold": 0.60

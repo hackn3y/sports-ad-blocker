@@ -2,11 +2,11 @@
 
 Live Broadcast & Streaming Ad Blocker for Windows 11.
 Supports two detection architectures:
-1. Sports Mode (Default): Dual-Anchor Keep-Alive (Scoreboard + Broadcast Bug/Watermark).
-   - Scoreboard and/or Channel Watermark (e.g. 'FOX NLCS GAME 1') present -> Live Game Action.
-   - Both vanish for the configured debounce -> Commercial Break confirmed.
+1. Sports Mode (Default): Scoreboard, Broadcast Bug/Watermark, and football field cues.
+   - Reliable live-game indicators present -> Live Game Action.
+   - Live-game indicators absent for the configured debounce -> Commercial Break.
    - Instant recovery: As soon as live indicators return -> Unblack and unmute immediately!
-   - 6.0s debounce buffer prevents false blackouts during instant replays or booth cutaways.
+   - Football field coverage and trusted bugs bridge scoreboard dropouts during replays.
 2. Ad Badge Mode: Traditional on-screen 'Ad' / 'Commercial' badge matching for on-demand shows.
 """
 
@@ -130,6 +130,18 @@ FOOTBALL_PERIOD_PATTERN = re.compile(
 FOOTBALL_DOWN_PATTERN = re.compile(
     r"\b[1-4](?:ST|ND|RD|TH)?\s*(?:&|AND)\s*(?:GOAL|\d{1,2})\b"
 )
+FOOTBALL_HALFTIME_PATTERN = re.compile(
+    r"\b(?:COUNTDOWN\s+TO\s+(?:THE\s+)?(?:2ND|SECOND)\s+HALF|"
+    r"(?:2ND|SECOND)\s+HALF|HALF[\s-]?TIME)\b"
+)
+
+
+def football_scoreboard_ocr_is_halftime(texts: List[str]) -> bool:
+  """Detect halftime countdown graphics that can resemble an active game clock."""
+  if not texts:
+    return False
+  normalized = re.sub(r"[^A-Z0-9:&]", " ", " ".join(texts).upper())
+  return bool(FOOTBALL_HALFTIME_PATTERN.search(normalized))
 
 
 def football_scoreboard_ocr_score(texts: List[str]) -> float:
@@ -137,11 +149,35 @@ def football_scoreboard_ocr_score(texts: List[str]) -> float:
   if not texts:
     return 0.0
   normalized = re.sub(r"[^A-Z0-9:&]", " ", " ".join(texts).upper())
+  if FOOTBALL_HALFTIME_PATTERN.search(normalized):
+    return 0.0
   if not FOOTBALL_CLOCK_PATTERN.search(normalized):
     return 0.0
   has_period = bool(FOOTBALL_PERIOD_PATTERN.search(normalized))
   has_down = bool(FOOTBALL_DOWN_PATTERN.search(normalized))
   return 0.8 if has_period or has_down else 0.0
+
+
+def football_field_green_metrics(frame_bgr: np.ndarray) -> Tuple[float, int]:
+  """Measure green coverage and how broadly it is distributed across the frame."""
+  if frame_bgr.size == 0:
+    return 0.0, 0
+
+  sample = cv2.resize(frame_bgr, (320, 180), interpolation=cv2.INTER_AREA)
+  hsv = cv2.cvtColor(sample, cv2.COLOR_BGR2HSV)
+  green_mask = cv2.inRange(
+      hsv, np.array([25, 35, 30]), np.array([100, 255, 255])
+  )
+  green = green_mask > 0
+  green_ratio = float(np.mean(green))
+
+  green_tiles = 0
+  for row in np.array_split(green, 3, axis=0):
+    for tile in np.array_split(row, 4, axis=1):
+      if float(np.mean(tile)) >= 0.15:
+        green_tiles += 1
+
+  return green_ratio, green_tiles
 
 
 def _process_executable(pid: int) -> str:
@@ -446,7 +482,7 @@ class DetectionEngine(QObject):
       self._init_badge_mode()
 
   def _init_sports_mode(self) -> None:
-    """Initialize Sports Multi-Profile and Dual-Anchor Keep-Alive mode."""
+    """Initialize sports profiles and live-game signal settings."""
     sports_cfg = self.config.get("sports_detection", {})
     self.search_padding = int(sports_cfg.get("search_padding", 50))
     # Wait briefly for transient anchor dropouts before blacking out.
@@ -467,10 +503,13 @@ class DetectionEngine(QObject):
         sports_cfg.get("scoreboard_fast_recovery_threshold", 0.85)
     )
     self.bug_only_grace_seconds = max(
-        0.0, float(sports_cfg.get("bug_only_grace_seconds", 15.0))
+        0.0, float(sports_cfg.get("bug_only_grace_seconds", 5.0))
     )
     self.bug_hold_threshold = float(
         sports_cfg.get("bug_hold_threshold", 0.55)
+    )
+    self.bug_strong_hold_threshold = float(
+        sports_cfg.get("bug_strong_hold_threshold", 0.85)
     )
     self.bug_miss_grace_seconds = max(
         0.0, float(sports_cfg.get("bug_miss_grace_seconds", 0.5))
@@ -481,9 +520,19 @@ class DetectionEngine(QObject):
     self.replay_bug_threshold = float(
         sports_cfg.get("replay_bug_threshold", 0.60)
     )
+    self.football_field_min_green_ratio = float(
+        sports_cfg.get("football_field_min_green_ratio", 0.18)
+    )
+    self.football_field_grace_seconds = max(
+        0.0, float(sports_cfg.get("football_field_grace_seconds", 1.0))
+    )
+    self.football_field_sample_interval = max(
+        0.1, float(sports_cfg.get("football_field_sample_interval_seconds", 0.25))
+    )
 
     self.live_lost_start: Optional[float] = None
     self.last_scoreboard_seen = time.monotonic()
+    self.last_football_scoreboard_seen: Optional[float] = None
     self.last_strong_scoreboard_seen: Optional[float] = None
     self.last_bug_seen: Optional[float] = None
     self.bug_anchor_confirmed = False
@@ -505,10 +554,17 @@ class DetectionEngine(QObject):
     self.scoreboard_ocr_interval = max(
         0.1, float(sports_cfg.get("scoreboard_ocr_interval_seconds", 0.2))
     )
+    self.football_halftime_ocr_interval = max(
+        0.5, float(sports_cfg.get("football_halftime_ocr_interval_seconds", 1.0))
+    )
     self._scoreboard_ocr_engine: Optional[Any] = None
     self._scoreboard_ocr_last_scan = 0.0
     self._scoreboard_ocr_cached_score = 0.0
     self._scoreboard_ocr_disabled = False
+    self._football_halftime_last_scan = 0.0
+    self._football_halftime_cached = False
+    self._football_field_last_scan = 0.0
+    self._football_field_cached_metrics = (0.0, 0)
 
     # Build profiles dictionary
     self.sports_profiles: Dict[str, SportProfile] = {}
@@ -762,6 +818,10 @@ class DetectionEngine(QObject):
         self._scoreboard_ocr_last_scan = time.monotonic()
         return False, 0.0
       texts = list(getattr(result, "txts", None) or [])
+      if football_scoreboard_ocr_is_halftime(texts):
+        self._scoreboard_ocr_cached_score = 0.0
+        self._scoreboard_ocr_last_scan = time.monotonic()
+        return False, 0.0
       candidate_score = football_scoreboard_ocr_score(texts)
       best_score = max(best_score, candidate_score)
       if best_score > 0:
@@ -770,6 +830,67 @@ class DetectionEngine(QObject):
     self._scoreboard_ocr_cached_score = best_score
     self._scoreboard_ocr_last_scan = time.monotonic()
     return best_score > 0.0, best_score
+
+  def _match_football_halftime_countdown(
+      self, sct: Any, scoreboard_roi: Dict[str, int]
+  ) -> bool:
+    """Periodically check scoreboard OCR for a halftime countdown banner."""
+    if self._scoreboard_ocr_disabled or self._scoreboard_ocr_engine is None:
+      return False
+
+    now = time.monotonic()
+    if now - self._football_halftime_last_scan < self.football_halftime_ocr_interval:
+      return self._football_halftime_cached
+
+    try:
+      raw = sct.grab(self._make_grab_box(scoreboard_roi))
+    except Exception:
+      logger.exception("Football halftime scoreboard capture failed.")
+      self._football_halftime_cached = False
+      self._football_halftime_last_scan = time.monotonic()
+      return False
+
+    bgra = np.frombuffer(raw.raw, dtype=np.uint8).reshape(
+        (raw.height, raw.width, 4)
+    )
+    image = cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR)
+    try:
+      result = self._scoreboard_ocr_engine(image)
+    except Exception:
+      self._scoreboard_ocr_disabled = True
+      logger.exception("Football halftime OCR failed; disabling OCR.")
+      self._football_halftime_cached = False
+      self._football_halftime_last_scan = time.monotonic()
+      return False
+
+    texts = list(getattr(result, "txts", None) or [])
+    self._football_halftime_cached = football_scoreboard_ocr_is_halftime(texts)
+    self._football_halftime_last_scan = time.monotonic()
+    return self._football_halftime_cached
+
+  def _sample_football_field(
+      self, sct: Any, playback: Dict[str, int]
+  ) -> Tuple[float, int]:
+    """Sample broad field-color coverage at a capped rate."""
+    now = time.monotonic()
+    if now - self._football_field_last_scan < self.football_field_sample_interval:
+      return self._football_field_cached_metrics
+
+    try:
+      raw = sct.grab(self._make_grab_box(playback))
+    except Exception:
+      logger.exception("Football field screen capture failed.")
+      self._football_field_cached_metrics = (0.0, 0)
+      self._football_field_last_scan = time.monotonic()
+      return self._football_field_cached_metrics
+
+    bgra = np.frombuffer(raw.raw, dtype=np.uint8).reshape(
+        (raw.height, raw.width, 4)
+    )
+    frame = cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR)
+    self._football_field_cached_metrics = football_field_green_metrics(frame)
+    self._football_field_last_scan = time.monotonic()
+    return self._football_field_cached_metrics
 
   def _match_profile_anchors(
       self, sct: Any, profile: "SportProfile"
@@ -811,6 +932,17 @@ class DetectionEngine(QObject):
     if not sb_matched and profile.scoreboard_ocr_enabled:
       sb_matched, sb_score = self._match_football_scoreboard_ocr(sct, playback)
 
+    football_halftime_countdown = False
+    if profile.key == "football" and profile.scoreboard_ocr_enabled:
+      mapped_scoreboard = map_roi_into_playback(
+          profile.scoreboard_roi, playback, cal, self.monitor_bounds
+      )
+      football_halftime_countdown = self._match_football_halftime_countdown(
+          sct, mapped_scoreboard
+      )
+      if football_halftime_countdown:
+        sb_matched, sb_score = False, 0.0
+
     if profile.bug_enabled and profile.bug_scaled_templates:
       mapped_bug = map_roi_into_playback(
           profile.bug_roi, playback, cal, self.monitor_bounds
@@ -823,7 +955,7 @@ class DetectionEngine(QObject):
     return sb_matched, sb_score, bug_matched, bug_score
 
   def _run_sports_loop(self) -> None:
-    """Main Sports Keep-Alive loop with Dual-Anchor & Multi-Sport Auto-Switching."""
+    """Run sports detection and multi-profile auto-switching."""
     attach_default_desktop()
 
     active_name = self.current_sport.name if self.current_sport else "None"
@@ -855,18 +987,39 @@ class DetectionEngine(QObject):
         anchor_check_time = time.monotonic()
         if sb_matched:
           self.last_scoreboard_seen = anchor_check_time
+          if profile is not None and profile.key == "football":
+            self.last_football_scoreboard_seen = anchor_check_time
         if sb_score >= self.replay_scoreboard_threshold:
           self.last_strong_scoreboard_seen = anchor_check_time
         if bug_matched:
           self.last_bug_seen = anchor_check_time
           self.bug_anchor_confirmed = True
 
-        # The bug can bridge short scoreboard dropouts during replays, but only
-        # for a bounded time after the last scoreboard match. It never reopens
-        # the screen from blackout because commercials can contain similar bugs.
-        bug_is_recent = (
-            anchor_check_time - self.last_scoreboard_seen <= self.bug_only_grace_seconds
+        field_green_ratio, field_green_tiles = 0.0, 0
+        if profile is not None and profile.key == "football" and not self.is_commercial:
+          playback = self._refresh_playback_rect()
+          field_green_ratio, field_green_tiles = self._sample_football_field(
+              sct, playback
+          )
+        football_halftime_countdown = (
+            profile is not None
+            and profile.key == "football"
+            and profile.scoreboard_ocr_enabled
+            and self._football_halftime_cached
         )
+
+        # A matched scoreboard arms football field detection; continued broad
+        # field coverage refreshes that evidence while the game remains visible.
+        # Bug evidence is separately confidence-gated and cannot reopen blackout.
+        replay_bug_threshold = self.replay_bug_threshold
+        if profile is not None and profile.key == "football":
+          replay_bug_threshold = max(replay_bug_threshold, profile.bug_threshold)
+        recent_bug_evidence_time = max(
+            self.last_scoreboard_seen,
+            self.last_bug_seen if self.last_bug_seen is not None else 0.0,
+        )
+        bug_evidence_age = anchor_check_time - recent_bug_evidence_time
+        bug_is_recent = bug_evidence_age <= self.bug_only_grace_seconds
         bug_signal_holds = self.bug_anchor_confirmed and (
             bug_score >= self.bug_hold_threshold
             or (
@@ -875,23 +1028,74 @@ class DetectionEngine(QObject):
                 <= self.bug_miss_grace_seconds
             )
         )
+        strong_bug_holds = (
+            self.bug_anchor_confirmed
+            and bug_score >= max(
+                self.bug_strong_hold_threshold,
+                profile.bug_threshold if profile is not None else 0.0,
+            )
+        )
         strong_scoreboard_is_recent = (
             self.last_strong_scoreboard_seen is not None
             and anchor_check_time - self.last_strong_scoreboard_seen
             <= self.bug_only_grace_seconds
         )
         replay_bug_holds = (
-            bug_score >= self.replay_bug_threshold
+            bug_score >= replay_bug_threshold
             and strong_scoreboard_is_recent
         )
-        live_detected = sb_matched or (
-            (bug_signal_holds and bug_is_recent or replay_bug_holds)
+        football_field_holds = (
+            profile is not None
+            and profile.key == "football"
             and not self.is_commercial
+            and self.last_football_scoreboard_seen is not None
+            and anchor_check_time - self.last_football_scoreboard_seen
+            <= self.football_field_grace_seconds
+            and field_green_ratio >= self.football_field_min_green_ratio
+            and field_green_tiles >= 4
+        )
+        if football_halftime_countdown:
+          live_signal_reason = "halftime-countdown"
+        elif sb_matched:
+          live_signal_reason = "scoreboard"
+        elif strong_bug_holds:
+          live_signal_reason = "strong-bug"
+        elif bug_signal_holds and bug_is_recent:
+          bug_grace_remaining = max(
+              0.0,
+              self.bug_only_grace_seconds - bug_evidence_age,
+          )
+          live_signal_reason = f"bug-grace {bug_grace_remaining:.1f}s"
+        elif replay_bug_holds:
+          live_signal_reason = "replay-bug"
+        elif football_field_holds:
+          live_signal_reason = "football-field"
+        else:
+          live_signal_reason = "none"
+        live_detected = (
+            not football_halftime_countdown
+            and (
+                sb_matched
+                or strong_bug_holds
+                or (
+                    (
+                        bug_signal_holds and bug_is_recent
+                        or replay_bug_holds
+                        or football_field_holds
+                    )
+                    and not self.is_commercial
+                )
+            )
         )
 
         # Require repeated scoreboard evidence before changing profiles. A bug-only
         # match is too weak because channel graphics can resemble another sport.
-        if self.auto_sport and not live_detected and self.is_commercial:
+        if (
+            self.auto_sport
+            and not live_detected
+            and self.is_commercial
+            and not football_halftime_countdown
+        ):
           switch_candidate: Optional[Tuple[SportProfile, float, float, bool]] = None
           for other_key, other_sp in self.sports_profiles.items():
             if other_sp == profile:
@@ -930,6 +1134,8 @@ class DetectionEngine(QObject):
               profile = other_sp
               live_detected = True
               sb_matched, sb_score = True, alt_sb_score
+              if other_sp.key == "football":
+                self.last_football_scoreboard_seen = anchor_check_time
               bug_score = alt_bug_score
               bug_matched = alt_bug_matched
               self.auto_switch_candidate = None
@@ -991,8 +1197,15 @@ class DetectionEngine(QObject):
               score_str = f"Scoreboard={sb_score:.2f}"
               if profile and profile.bug_enabled:
                 score_str += f", Bug={bug_score:.2f}"
+              if profile and profile.key == "football":
+                score_str += (
+                    f", Field={field_green_ratio:.2f}/{field_green_tiles} tiles"
+                )
               print(
-                  f"[LIVE - {sport_label}] Verified ({score_str}) | Check: {latency_ms:.1f}ms | FPS: {current_fps:.1f}",
+                  f"[LIVE - {sport_label}] Verified ({score_str}) | "
+                  f"Matches=SB:{sb_matched}/Bug:{bug_matched} | "
+                  f"Hold={live_signal_reason} | Check: {latency_ms:.1f}ms | "
+                  f"FPS: {current_fps:.1f}",
                   flush=True,
               )
               last_heartbeat = now
@@ -1011,12 +1224,18 @@ class DetectionEngine(QObject):
               self.commercial_start_time = now
               self.live_lost_start = None
               self.last_strong_scoreboard_seen = None
+              self.last_football_scoreboard_seen = None
               self.bug_anchor_confirmed = False
               self.last_bug_seen = None
               self.audio_mgr.set_browser_mute(True)
               self.sig_trigger_blackout.emit(True)
               print(
-                  f"\n[COMMERCIAL BREAK DETECTED] Live indicators absent for {lost_elapsed:.1f}s | TV Blacked Out & Browser Muted | Response: {latency_ms:.1f}ms",
+                  f"\n[COMMERCIAL BREAK DETECTED] "
+                  f"Live indicators absent for {lost_elapsed:.1f}s | "
+                  f"SB={sb_score:.2f} (match={sb_matched}) "
+                  f"Bug={bug_score:.2f} (match={bug_matched}) | "
+                  f"Hold={live_signal_reason} | TV Blacked Out & Browser Muted | "
+                  f"Response: {latency_ms:.1f}ms",
                   flush=True,
               )
             else:
@@ -1042,7 +1261,10 @@ class DetectionEngine(QObject):
               )
             elif now - last_heartbeat >= self.heartbeat_interval:
               print(
-                  f"[COMMERCIAL ACTIVE] Waiting for game return (SB={sb_score:.2f}, Bug={bug_score:.2f}, {break_duration:.0f}s) | Blackout held",
+                  f"[COMMERCIAL ACTIVE] Waiting for game return "
+                  f"(SB={sb_score:.2f}/{sb_matched}, "
+                  f"Bug={bug_score:.2f}/{bug_matched}, "
+                  f"{break_duration:.0f}s) | Blackout held",
                   flush=True,
               )
               last_heartbeat = now
@@ -1437,11 +1659,23 @@ def run_test_detection(
         if p is not None:
           sb_ok, sb_conf, bug_ok, bug_conf = engine._match_profile_anchors(sct, p)
 
+        field_ratio, field_tiles = (0.0, 0)
+        if p is not None and p.key == "football":
+          field_ratio, field_tiles = engine._sample_football_field(
+              sct, engine._refresh_playback_rect()
+          )
+
         live = sb_ok or bug_ok
         status = f"LIVE ({p.name if p else 'Game'})" if live else "COMMERCIAL / ABSENT"
-        info = f"Scoreboard={sb_conf:.2f}"
+        info = (
+            f"SB={sb_conf:.2f}/{sb_ok}"
+            if p is not None
+            else "SB=unavailable"
+        )
         if p and p.bug_enabled:
-          info += f", Bug={bug_conf:.2f}"
+          info += f", Bug={bug_conf:.2f}/{bug_ok}"
+        if p and p.key == "football":
+          info += f", Field={field_ratio:.2f}/{field_tiles} tiles"
       else:
         badge_box = engine._make_grab_box(engine.badge_roi)
         raw = sct.grab(badge_box)
@@ -1453,7 +1687,8 @@ def run_test_detection(
       peak = audio_mgr.get_peak_volume()
       latency = (time.perf_counter() - t0) * 1000.0
       print(
-          f"Frame {i + 1:2d} | Status: {status:22s} | Conf: ({info:26s}) | Audio: {peak:.3f} | Latency: {latency:4.1f}ms"
+          f"Frame {i + 1:2d} | Status: {status:22s} | "
+          f"Signals: ({info}) | Audio: {peak:.3f} | Latency: {latency:4.1f}ms"
       )
       time.sleep(0.1)
 
@@ -1732,7 +1967,7 @@ def main() -> None:
     print(
         "    >>> Bug-only replay grace: %.1fs after the last scoreboard match."
         % float(config.get("sports_detection", {}).get(
-            "bug_only_grace_seconds", 15.0
+            "bug_only_grace_seconds", 5.0
         ))
     )
   else:
